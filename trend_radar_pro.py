@@ -48,7 +48,8 @@ def get_real_search_volume(api_key, secret_key, customer_id, keyword):
                         pc = 10 if str(item['monthlyPcQcCnt']).startswith("<") else int(item['monthlyPcQcCnt'])
                         mo = 10 if str(item['monthlyMobileQcCnt']).startswith("<") else int(item['monthlyMobileQcCnt'])
                         return {"total_vol": pc + mo, "compIdx": item['compIdx']}
-        return None
+        # 如果API返回正常但没找到词，或者流量太低被API忽略，视为0
+        return {"total_vol": 0, "compIdx": "低"} 
     except:
         return None
 
@@ -106,7 +107,14 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     
     for yr in reference_years:
         mask_base = (df['year'] == yr) & (df['month'] == base_month)
-        val_base = df[mask_base]['ratio'].mean() if not df[mask_base].empty else 0.01
+        
+        # 即使基数为0，也给个极小值，保证倍数能算出来 (为了看趋势)
+        base_data = df[mask_base]
+        if not base_data.empty:
+            val_base = base_data['ratio'].mean()
+            if val_base < 0.01: val_base = 0.01 
+        else:
+            val_base = 0.01 
         
         if target_start_m <= target_end_m:
             mask_target = (df['year'] == yr) & (df['month'] >= target_start_m) & (df['month'] <= target_end_m)
@@ -115,9 +123,8 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
              
         val_target = df[mask_target]['ratio'].mean() if not df[mask_target].empty else 0
         
-        if val_base > 0.5:
-            m = val_target / val_base
-            multipliers.append(m)
+        m = val_target / val_base
+        multipliers.append(m)
             
     if not multipliers: return None
     avg_multiplier = sum(multipliers) / len(multipliers)
@@ -139,6 +146,14 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     elif avg_multiplier > 1.2: tag, score = "📈 A级: 稳步增长", 80
     elif avg_multiplier < 0.8: tag, score = "❄️ D级: 季节性回落", 0
     
+    # 文案处理
+    if current_vol < 10:
+        display_monthly_sales = "⚠️ 当前无基数"
+        display_total_stock = "📉 建议旺季前再测"
+    else:
+        display_monthly_sales = f"{int(predicted_monthly_sales)} 单"
+        display_total_stock = f"{int(total_season_sales)} 单"
+
     return {
         "关键词": keyword,
         "评级": tag,
@@ -147,8 +162,14 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
         "增长系数": round(avg_multiplier, 2),
         "🔍 预测Naver热度": int(predicted_naver_vol),
         "🔵 预估Coupang流量": int(predicted_coupang_vol), 
-        "💰 月均单量": int(predicted_monthly_sales),
-        "📦 备货总单量": int(total_season_sales),
+        
+        # 排序用
+        "_sort_sales": int(predicted_monthly_sales),
+        
+        # 展示用
+        "💰 月均单量": display_monthly_sales,
+        "📦 备货总单量": display_total_stock,
+        
         "RawData": df,
         "参考年份数": compare_years_depth,
         "reference_years": reference_years
@@ -172,35 +193,16 @@ with st.sidebar:
     st.write("### ⚙️ 第二步：核心参数")
     
     current_y = datetime.now().year
-    
-    # 年份选择
     year_options = [current_y + i for i in range(-3, 4)]
     default_year_index = year_options.index(current_y)
     
-    target_year = st.selectbox(
-        "1. 目标年份", 
-        year_options, 
-        index=default_year_index
-    )
-    
-    # 月份区间
-    target_range = st.slider(
-        "2. 月份区间", 
-        1, 12, (10, 11), 
-        format="%d月"
-    )
+    target_year = st.selectbox("1. 目标年份", year_options, index=default_year_index)
+    target_range = st.slider("2. 月份区间", 1, 12, (10, 11), format="%d月")
     t_start, t_end = target_range
     
     st.divider()
-    
-    # 流量对标
-    st.caption("3. 流量对标 (Naver vs Coupang)：")
-    volume_ratio = st.slider("平台对标系数", 50, 150, 100, 10, format="%d%%")
-    
-    # 转化率
-    st.caption("4. 转化率 (CVR)：")
-    cvr = st.slider("转化率", 1.0, 10.0, 5.0, 0.1, format="%.1f%%")
-    
+    volume_ratio = st.slider("3. 平台对标系数", 50, 150, 100, 10, format="%d%%")
+    cvr = st.slider("4. 转化率 (CVR)", 1.0, 10.0, 5.0, 0.1, format="%.1f%%")
     st.divider()
     compare_depth = st.radio("参考历史年份", (1, 2, 3), index=1, format_func=lambda x: f"参考过去 {x} 年")
 
@@ -238,19 +240,19 @@ if st.button("🚀 开始运行", type="primary"):
             progress.progress((i+1)/len(kws))
             
         if results:
-            df = pd.DataFrame(results).sort_values(by=['📦 备货总单量'], ascending=False)
+            df = pd.DataFrame(results).sort_values(by=['_sort_sales'], ascending=False)
             st.success(f"✅ {target_year}年 预测报告生成完毕！")
             
             st.dataframe(
-                df.drop(columns=['RawData', 'reference_years', '参考年份数']),
+                df.drop(columns=['RawData', 'reference_years', '参考年份数', '_sort_sales']),
                 use_container_width=True,
                 column_config={
-                    "当前Search量": st.column_config.NumberColumn(format="%d"),
+                    "当前Search量": st.column_config.NumberColumn(format="%d", help="当前30天真实数据"),
                     "增长系数": st.column_config.NumberColumn(format="x %.2f"),
-                    "🔍 预测Naver热度": st.column_config.NumberColumn(format="%d", help="Naver端预测值"),
-                    "🔵 预估Coupang流量": st.column_config.NumberColumn(format="%d", help=f"按 {volume_ratio}% 对标系数折算"),
-                    "💰 月均单量": st.column_config.NumberColumn(format="%d 单"),
-                    "📦 备货总单量": st.column_config.NumberColumn(format="%d 单", help="最终备货参考"),
+                    "🔍 预测Naver热度": st.column_config.NumberColumn(format="%d"),
+                    "🔵 预估Coupang流量": st.column_config.NumberColumn(format="%d"),
+                    "💰 月均单量": st.column_config.TextColumn(help="基数过低时显示提示"),
+                    "📦 备货总单量": st.column_config.TextColumn(help="基数过低时显示提示"),
                     "竞争度": st.column_config.TextColumn()
                 }
             )
