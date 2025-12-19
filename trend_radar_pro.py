@@ -48,7 +48,7 @@ def get_real_search_volume(api_key, secret_key, customer_id, keyword):
                         pc = 10 if str(item['monthlyPcQcCnt']).startswith("<") else int(item['monthlyPcQcCnt'])
                         mo = 10 if str(item['monthlyMobileQcCnt']).startswith("<") else int(item['monthlyMobileQcCnt'])
                         return {"total_vol": pc + mo, "compIdx": item['compIdx']}
-        # 如果API返回正常但没找到词，或者流量太低被API忽略，视为0
+        # 没找到或流量极低
         return {"total_vol": 0, "compIdx": "低"} 
     except:
         return None
@@ -108,7 +108,6 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     for yr in reference_years:
         mask_base = (df['year'] == yr) & (df['month'] == base_month)
         
-        # 即使基数为0，也给个极小值，保证倍数能算出来 (为了看趋势)
         base_data = df[mask_base]
         if not base_data.empty:
             val_base = base_data['ratio'].mean()
@@ -146,9 +145,10 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     elif avg_multiplier > 1.2: tag, score = "📈 A级: 稳步增长", 80
     elif avg_multiplier < 0.8: tag, score = "❄️ D级: 季节性回落", 0
     
-    # 文案处理
-    if current_vol < 10:
-        display_monthly_sales = "⚠️ 当前无基数"
+    # 🔥🔥🔥 核心修复：提高基数门槛到 100 🔥🔥🔥
+    # 之前是 < 10，导致 90 这种低流量词也会被放大几千倍
+    if current_vol < 100:
+        display_monthly_sales = "⚠️ 当前基数过低"
         display_total_stock = "📉 建议旺季前再测"
     else:
         display_monthly_sales = f"{int(predicted_monthly_sales)} 单"
@@ -163,10 +163,9 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
         "🔍 预测Naver热度": int(predicted_naver_vol),
         "🔵 预估Coupang流量": int(predicted_coupang_vol), 
         
-        # 排序用
-        "_sort_sales": int(predicted_monthly_sales),
+        # 排序权重: 如果基数过低，强制排在后面
+        "_sort_sales": -1 if current_vol < 100 else int(predicted_monthly_sales),
         
-        # 展示用
         "💰 月均单量": display_monthly_sales,
         "📦 备货总单量": display_total_stock,
         
@@ -251,8 +250,8 @@ if st.button("🚀 开始运行", type="primary"):
                     "增长系数": st.column_config.NumberColumn(format="x %.2f"),
                     "🔍 预测Naver热度": st.column_config.NumberColumn(format="%d"),
                     "🔵 预估Coupang流量": st.column_config.NumberColumn(format="%d"),
-                    "💰 月均单量": st.column_config.TextColumn(help="基数过低时显示提示"),
-                    "📦 备货总单量": st.column_config.TextColumn(help="基数过低时显示提示"),
+                    "💰 月均单量": st.column_config.TextColumn(help="基数<100时不显示预测"),
+                    "📦 备货总单量": st.column_config.TextColumn(help="基数<100时不显示预测"),
                     "竞争度": st.column_config.TextColumn()
                 }
             )
