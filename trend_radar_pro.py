@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 # ================= 1. 页面配置 =================
 st.set_page_config(
-    page_title="Naver 核武器 (日期精准版)", 
+    page_title="Naver 核武器 (中文日期版)", 
     page_icon="☢️", 
     layout="wide"
 )
@@ -59,13 +59,12 @@ def get_datalab_trend(client_id, client_secret, keyword):
         "X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret, "Content-Type": "application/json"
     }
     end_date = datetime.now()
-    # 查近4年数据，量会比较大
     start_date = end_date - timedelta(days=365 * 4 + 30) 
     
     body = {
         "startDate": start_date.strftime("%Y-%m-%d"),
         "endDate": end_date.strftime("%Y-%m-%d"),
-        "timeUnit": "date", # 必须精确到天
+        "timeUnit": "date", 
         "keywordGroups": [{"groupName": keyword, "keywords": [keyword]}]
     }
     try:
@@ -74,9 +73,9 @@ def get_datalab_trend(client_id, client_secret, keyword):
     except: return None
     return None
 
-# ================= 4. 计算核心 (日期区间映射算法) =================
+# ================= 4. 计算核心 =================
 def calculate_prediction(keyword, ads_keys, datalab_keys, target_date_start, target_date_end, cvr_rate, compare_years_depth):
-    # Step 1: Ads 流量 (代表“过去30天”的绝对值)
+    # Step 1: Ads 流量
     ads_data = get_real_search_volume(ads_keys['key'], ads_keys['secret'], ads_keys['id'], keyword)
     
     current_vol = 0
@@ -97,36 +96,28 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_date_start, tar
     df['period'] = pd.to_datetime(df['period'])
     df['ratio'] = df['ratio'].astype(float)
     df['year'] = df['period'].dt.year
-    df['month'] = df['period'].dt.month
-    df['day'] = df['period'].dt.day
     
-    # Step 3: 计算倍数 (Date-Range Mapping)
-    # 逻辑：Ads流量是“当前真实基数”。我们需要算出 历史同期的“目标区间”是“基准区间”的多少倍。
-    # 基准区间 = 过去30天 (因为Ads数据代表近30天)
-    
+    # Step 3: 计算倍数
     now_date = datetime.now().date()
+    # 基准区间 = 过去30天
     base_end_md = now_date
     base_start_md = now_date - timedelta(days=30)
     
     multipliers = []
     this_year = datetime.now().year
     
-    # 生成用户想参考的历史年份 (如 [2024, 2023])
     target_years_list = [this_year - i for i in range(1, compare_years_depth + 1)]
     
     for yr in target_years_list:
-        # A. 构造该年份的“基准区间” (历史上的过去30天)
-        # 例如：如果是2024年，就找 2024年的 8.20-9.19
         try:
+            # A. 历史基准区间
             h_base_start = base_start_md.replace(year=yr)
             h_base_end = base_end_md.replace(year=yr)
             
-            # B. 构造该年份的“目标区间” (用户选的未来日期)
-            # 例如：用户选了 10.1-10.7，我们就找 2024年的 10.1-10.7
+            # B. 历史目标区间
             h_target_start = target_date_start.replace(year=yr)
             h_target_end = target_date_end.replace(year=yr)
             
-            # 如果跨年了或者日期无效(闰年)，简单跳过或容错
         except ValueError:
             continue
             
@@ -137,8 +128,7 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_date_start, tar
         mask_target = (df['period'].dt.date >= h_target_start) & (df['period'].dt.date <= h_target_end)
         val_target = df[mask_target]['ratio'].mean() if not df[mask_target].empty else 0
         
-        # D. 算倍数
-        if val_base > 0.1: # 避免噪音
+        if val_base > 0.1:
             m = val_target / val_base
             multipliers.append(m)
             
@@ -146,18 +136,10 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_date_start, tar
     avg_multiplier = sum(multipliers) / len(multipliers)
     
     # Step 4: 最终预测
-    # 预测的是“目标区间内的日均流量”的总和? 
-    # 不，Ads给的是月总量(30天总量)。
-    # 我们这里算出的倍数是：目标区间的热度密度 / 当前30天的热度密度
-    # 所以：预测目标区间总流量 = (当前30天流量 / 30 * 目标天数) * 倍数
-    
     days_in_target = (target_date_end - target_date_start).days + 1
     current_daily_avg = current_vol / 30
     
-    # 预测：目标区间每一天的平均流量 * 天数
     predicted_total_vol = (current_daily_avg * avg_multiplier) * days_in_target
-    
-    # 预测出单
     predicted_total_sales = predicted_total_vol * (cvr_rate / 100)
     
     tag, score = "😐 平稳", 50
@@ -180,7 +162,7 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_date_start, tar
     }
 
 # ================= 5. UI 界面 =================
-st.title("☢️ Naver 选品核武器 (日期精准版)")
+st.title("☢️ Naver 选品核武器 (中文日期版)")
 
 with st.sidebar:
     st.write("### 🔑 第一步：填写密钥")
@@ -196,25 +178,23 @@ with st.sidebar:
     st.divider()
     st.write("### ⚙️ 第二步：预测设置")
     
-    # 🔥🔥🔥 核心修改：使用 date_input 选择具体日期 🔥🔥🔥
-    st.caption("选择你要预测的未来时间段 (比如: 10/15 - 10/31)")
+    # 🔥🔥🔥 核心修改：拆分为两个独立的日期选择器 🔥🔥🔥
+    st.caption("请选择您要预测的起止时间：")
     
-    # 默认选下个月
+    col1, col2 = st.columns(2)
+    
     default_start = datetime.now().date() + timedelta(days=30)
     default_end = default_start + timedelta(days=14)
     
-    date_range = st.date_input(
-        "目标日期区间",
-        (default_start, default_end),
-        format="YYYY/MM/DD"
-    )
+    with col1:
+        t_date_start = st.date_input("开始日期 (Start)", default_start, format="YYYY/MM/DD")
     
-    # 容错处理：用户没选完区间时
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        t_date_start, t_date_end = date_range
-    else:
-        st.warning("请在日历上点击【开始】和【结束】两个日期")
-        t_date_start, t_date_end = default_start, default_end
+    with col2:
+        t_date_end = st.date_input("结束日期 (End)", default_end, format="YYYY/MM/DD")
+        
+    # 逻辑检查
+    if t_date_start > t_date_end:
+        st.error("⚠️ 结束日期不能早于开始日期！")
 
     compare_depth = st.radio(
         "参考历史年份", (1, 2, 3), index=1,
@@ -227,79 +207,85 @@ st.write("### 📝 第三步：输入关键词")
 keywords_input = st.text_area("输入关键词 (每行一个)", height=150, placeholder="例如：\n감따는기구\n가습기")
 
 if st.button("🚀 开始运行", type="primary"):
-    missing_items = []
-    if not ads_key: missing_items.append("Access License")
-    if not ads_secret: missing_items.append("Secret Key")
-    if not cust_id: missing_items.append("Customer ID")
-    if not datalab_id: missing_items.append("Client ID")
-    if not datalab_secret: missing_items.append("Client Secret")
-    if not keywords_input: missing_items.append("关键词")
-
-    if missing_items:
-        st.error(f"❌ 请完善信息：\n" + "\n".join([f"- {item}" for item in missing_items]))
+    # 阻断逻辑：如果日期选反了，不让跑
+    if t_date_start > t_date_end:
+        st.error("无法运行：请修正日期范围（结束日期必须晚于开始日期）")
     else:
-        kws = [k.strip() for k in keywords_input.replace("\n", ",").split(",") if k.strip()]
-        days_count = (t_date_end - t_date_start).days + 1
-        st.info(f"✅ 正在预测 **{t_date_start}** 至 **{t_date_end}** (共{days_count}天) 的表现...")
-        
-        ads_conf = {'key': ads_key, 'secret': ads_secret, 'id': cust_id}
-        lab_conf = {'id': datalab_id, 'secret': datalab_secret}
-        
-        results = []
-        progress = st.progress(0)
-        
-        for i, kw in enumerate(kws):
-            res = calculate_prediction(kw, ads_conf, lab_conf, t_date_start, t_date_end, cvr, compare_depth)
-            if res: results.append(res)
-            time.sleep(0.2)
-            progress.progress((i+1)/len(kws))
-            
-        if results:
-            df = pd.DataFrame(results).sort_values(by=['💰 预测区间总单'], ascending=False)
-            st.success("✅ 预测完成！")
-            
-            st.dataframe(
-                df.drop(columns=['RawData', '得分', '参考年份数', '天数']),
-                use_container_width=True,
-                column_config={
-                    "当前Search量": st.column_config.NumberColumn(format="%d", help="过去30天总量"),
-                    "增长系数": st.column_config.NumberColumn(format="x %.2f"),
-                    "🔍 预测区间总搜": st.column_config.ProgressColumn(format="%d", min_value=0, max_value=max(df['🔍 预测区间总搜'])),
-                    "💰 预测区间总单": st.column_config.NumberColumn(format="%d 单", help=f"这{days_count}天的总预测单量"),
-                    "竞争度": st.column_config.TextColumn()
-                }
-            )
-            
-            st.divider()
-            for _, row in df.head(3).iterrows():
-                kw, raw_df = row['关键词'], row['RawData']
-                depth = row['参考年份数']
-                
-                fig = go.Figure()
-                
-                years = sorted(raw_df['year'].unique())
-                target_years = [datetime.now().year - i for i in range(1, depth + 1)]
-                
-                for yr in years:
-                    if yr in target_years:
-                        y_data = raw_df[raw_df['year'] == yr]
-                        fig.add_trace(go.Scatter(
-                            x=y_data['period'], y=y_data['ratio'], 
-                            mode='lines', name=f"{yr}年",
-                            hovertemplate="<b>%{x|%Y-%m-%d}</b><br>热度: %{y:.1f}<extra></extra>"
-                        ))
-                
-                # 标记具体日期区间 (注意年份映射)
-                # 为了图表好看，我们把预测区间的标记画在“参考年份”的最后一年上
-                ref_year = target_years[0] # 取最近的一年作为参考坐标
-                
-                v_start = t_date_start.replace(year=ref_year)
-                v_end = t_date_end.replace(year=ref_year)
-                
-                fig.add_vrect(x0=v_start, x1=v_end, 
-                              fillcolor="red", opacity=0.1, annotation_text="目标区间")
-                
-                fig.update_layout(title=f"【{kw}】历史走势 (红色区域为你的预测时段)", height=350, hovermode="x unified")
-                st.plotly_chart(fig, use_container_width=True)
+        missing_items = []
+        if not ads_key: missing_items.append("Access License")
+        if not ads_secret: missing_items.append("Secret Key")
+        if not cust_id: missing_items.append("Customer ID")
+        if not datalab_id: missing_items.append("Client ID")
+        if not datalab_secret: missing_items.append("Client Secret")
+        if not keywords_input: missing_items.append("关键词")
+
+        if missing_items:
+            st.error(f"❌ 请完善信息：\n" + "\n".join([f"- {item}" for item in missing_items]))
         else:
-            st.warning("⚠️ 运行结束，未得到有效数据。")
+            kws = [k.strip() for k in keywords_input.replace("\n", ",").split(",") if k.strip()]
+            days_count = (t_date_end - t_date_start).days + 1
+            st.info(f"✅ 正在预测 **{t_date_start}** 至 **{t_date_end}** (共{days_count}天) 的表现...")
+            
+            ads_conf = {'key': ads_key, 'secret': ads_secret, 'id': cust_id}
+            lab_conf = {'id': datalab_id, 'secret': datalab_secret}
+            
+            results = []
+            progress = st.progress(0)
+            
+            for i, kw in enumerate(kws):
+                res = calculate_prediction(kw, ads_conf, lab_conf, t_date_start, t_date_end, cvr, compare_depth)
+                if res: results.append(res)
+                time.sleep(0.2)
+                progress.progress((i+1)/len(kws))
+                
+            if results:
+                df = pd.DataFrame(results).sort_values(by=['💰 预测区间总单'], ascending=False)
+                st.success("✅ 预测完成！")
+                
+                st.dataframe(
+                    df.drop(columns=['RawData', '得分', '参考年份数', '天数']),
+                    use_container_width=True,
+                    column_config={
+                        "当前Search量": st.column_config.NumberColumn(format="%d", help="过去30天总量"),
+                        "增长系数": st.column_config.NumberColumn(format="x %.2f"),
+                        "🔍 预测区间总搜": st.column_config.ProgressColumn(format="%d", min_value=0, max_value=max(df['🔍 预测区间总搜'])),
+                        "💰 预测区间总单": st.column_config.NumberColumn(format="%d 单", help=f"这{days_count}天的总预测单量"),
+                        "竞争度": st.column_config.TextColumn()
+                    }
+                )
+                
+                st.divider()
+                for _, row in df.head(3).iterrows():
+                    kw, raw_df = row['关键词'], row['RawData']
+                    depth = row['参考年份数']
+                    
+                    fig = go.Figure()
+                    
+                    years = sorted(raw_df['year'].unique())
+                    target_years = [datetime.now().year - i for i in range(1, depth + 1)]
+                    
+                    for yr in years:
+                        if yr in target_years:
+                            y_data = raw_df[raw_df['year'] == yr]
+                            fig.add_trace(go.Scatter(
+                                x=y_data['period'], y=y_data['ratio'], 
+                                mode='lines', name=f"{yr}年",
+                                hovertemplate="<b>%{x|%Y-%m-%d}</b><br>热度: %{y:.1f}<extra></extra>"
+                            ))
+                    
+                    ref_year = target_years[0] if target_years else years[-1]
+                    
+                    # 容错：防止闰年日期错误 (如2月29日映射到平年)
+                    try:
+                        v_start = t_date_start.replace(year=ref_year)
+                        v_end = t_date_end.replace(year=ref_year)
+                        
+                        fig.add_vrect(x0=v_start, x1=v_end, 
+                                      fillcolor="red", opacity=0.1, annotation_text="目标区间")
+                    except:
+                        pass # 如果日期映射失败就不画框了
+                    
+                    fig.update_layout(title=f"【{kw}】历史走势 (红色区域为你的预测时段)", height=350, hovermode="x unified")
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("⚠️ 运行结束，未得到有效数据。")
