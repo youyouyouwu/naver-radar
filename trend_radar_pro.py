@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 # ================= 1. 页面配置 =================
 st.set_page_config(
-    page_title="Naver 选品核武器 (淡季修正版)", 
+    page_title="Naver 选品核武器", 
     page_icon="☢️", 
     layout="wide"
 )
@@ -106,13 +106,7 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     
     for yr in reference_years:
         mask_base = (df['year'] == yr) & (df['month'] == base_month)
-        # 🔥🔥🔥 修正点：即使基数极低(淡季)，也给一个最小值 0.1，防止被过滤 🔥🔥🔥
-        base_data = df[mask_base]
-        if not base_data.empty:
-            val_base = base_data['ratio'].mean()
-            if val_base < 0.1: val_base = 0.1 # 强制托底
-        else:
-            val_base = 0.1 # 无数据时的默认底数
+        val_base = df[mask_base]['ratio'].mean() if not df[mask_base].empty else 0.01
         
         if target_start_m <= target_end_m:
             mask_target = (df['year'] == yr) & (df['month'] >= target_start_m) & (df['month'] <= target_end_m)
@@ -121,8 +115,7 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
              
         val_target = df[mask_target]['ratio'].mean() if not df[mask_target].empty else 0
         
-        # 只要有目标流量，就算倍数，不再设高门槛
-        if val_target > 0:
+        if val_base > 0.5:
             m = val_target / val_base
             multipliers.append(m)
             
@@ -131,13 +124,6 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     
     # Step 4: 最终预测
     predicted_naver_vol = current_vol * avg_multiplier
-    
-    # 如果当前量是0（说明现在完全没人搜），但增长系数巨大，我们需要给一个“起步流量”
-    # 否则 0 * 100倍 还是 0。
-    # 假设Ads查不到量(0)但DataLab有趋势，我们默认给个低保 10 作为基数
-    if current_vol == 0 and avg_multiplier > 5.0:
-        predicted_naver_vol = 10 * avg_multiplier
-
     predicted_coupang_vol = predicted_naver_vol * (volume_ratio / 100)
     predicted_monthly_sales = predicted_coupang_vol * (cvr_rate / 100)
     
@@ -169,7 +155,7 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     }
 
 # ================= 5. UI 界面 =================
-st.title("☢️ Naver 选品核武器 (淡季修正版)")
+st.title("☢️ Naver 选品核武器")
 
 with st.sidebar:
     st.write("### 🔑 第一步：填写密钥")
@@ -186,16 +172,35 @@ with st.sidebar:
     st.write("### ⚙️ 第二步：核心参数")
     
     current_y = datetime.now().year
+    
+    # 年份选择
     year_options = [current_y + i for i in range(-3, 4)]
     default_year_index = year_options.index(current_y)
     
-    target_year = st.selectbox("1. 目标年份", year_options, index=default_year_index)
-    target_range = st.slider("2. 月份区间", 1, 12, (10, 11), format="%d月")
+    target_year = st.selectbox(
+        "1. 目标年份", 
+        year_options, 
+        index=default_year_index
+    )
+    
+    # 月份区间
+    target_range = st.slider(
+        "2. 月份区间", 
+        1, 12, (10, 11), 
+        format="%d月"
+    )
     t_start, t_end = target_range
     
     st.divider()
-    volume_ratio = st.slider("3. 平台对标系数", 50, 150, 100, 10, format="%d%%")
-    cvr = st.slider("4. 转化率 (CVR)", 1.0, 10.0, 5.0, 0.1, format="%.1f%%")
+    
+    # 流量对标
+    st.caption("3. 流量对标 (Naver vs Coupang)：")
+    volume_ratio = st.slider("平台对标系数", 50, 150, 100, 10, format="%d%%")
+    
+    # 转化率
+    st.caption("4. 转化率 (CVR)：")
+    cvr = st.slider("转化率", 1.0, 10.0, 5.0, 0.1, format="%.1f%%")
+    
     st.divider()
     compare_depth = st.radio("参考历史年份", (1, 2, 3), index=1, format_func=lambda x: f"参考过去 {x} 年")
 
