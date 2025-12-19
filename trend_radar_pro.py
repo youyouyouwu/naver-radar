@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 # ================= 1. 页面配置 =================
 st.set_page_config(
-    page_title="Naver 核武器 (年份双选版)", 
+    page_title="Naver 选品核武器", 
     page_icon="☢️", 
     layout="wide"
 )
@@ -155,7 +155,7 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     }
 
 # ================= 5. UI 界面 =================
-st.title("☢️ Naver 选品核武器 (年份+月份版)")
+st.title("☢️ Naver 选品核武器")
 
 with st.sidebar:
     st.write("### 🔑 第一步：填写密钥")
@@ -171,25 +171,37 @@ with st.sidebar:
     st.divider()
     st.write("### ⚙️ 第二步：核心参数")
     
-    st.caption("1. 目标时间：")
-    
-    # 🔥🔥🔥 核心修改：新增年份选择 🔥🔥🔥
-    col_y, col_m = st.columns([1, 2])
     current_y = datetime.now().year
-    with col_y:
-        target_year = st.selectbox("目标年份", [current_y, current_y + 1], index=0)
-        
-    with col_m:
-        # 这里的 key 是为了防止重载时状态丢失
-        target_range = st.slider("月份区间", 1, 12, (10, 11), format="%d月")
-        t_start, t_end = target_range
     
-    st.caption("2. 流量对标 (Naver vs Coupang)：")
+    # 年份选择
+    year_options = [current_y + i for i in range(-3, 4)]
+    default_year_index = year_options.index(current_y)
+    
+    target_year = st.selectbox(
+        "1. 目标年份", 
+        year_options, 
+        index=default_year_index
+    )
+    
+    # 月份区间
+    target_range = st.slider(
+        "2. 月份区间", 
+        1, 12, (10, 11), 
+        format="%d月"
+    )
+    t_start, t_end = target_range
+    
+    st.divider()
+    
+    # 流量对标
+    st.caption("3. 流量对标 (Naver vs Coupang)：")
     volume_ratio = st.slider("平台对标系数", 50, 150, 100, 10, format="%d%%")
     
-    st.caption("3. 转化率 (CVR)：")
+    # 转化率
+    st.caption("4. 转化率 (CVR)：")
     cvr = st.slider("转化率", 1.0, 10.0, 5.0, 0.1, format="%.1f%%")
     
+    st.divider()
     compare_depth = st.radio("参考历史年份", (1, 2, 3), index=1, format_func=lambda x: f"参考过去 {x} 年")
 
 st.write("### 📝 第三步：输入关键词")
@@ -211,7 +223,6 @@ if st.button("🚀 开始运行", type="primary"):
         if t_end >= t_start: m_count = t_end - t_start + 1
         else: m_count = (12 - t_start + 1) + t_end
         
-        # 提示信息带上年份
         st.info(f"✅ 正在分析 **{target_year}年 {t_start}月 - {t_end}月** (共 {m_count} 个月) 的备货潜力...")
         
         ads_conf = {'key': ads_key, 'secret': ads_secret, 'id': cust_id}
@@ -251,7 +262,6 @@ if st.button("🚀 开始运行", type="primary"):
                 
                 fig = go.Figure()
                 
-                # 画图：今年(2025) + 历史(2024, 2023...)
                 this_year_real = datetime.now().year
                 all_years_to_plot = ref_years + [this_year_real]
                 years_in_data = sorted(raw_df['year'].unique())
@@ -262,11 +272,9 @@ if st.button("🚀 开始运行", type="primary"):
                         
                         if yr == this_year_real:
                             line_style = dict(color='red', width=3)
-                            z_order = 10
                             name_str = f"{yr}年 (今年实况)"
                         else:
                             line_style = dict(width=1)
-                            z_order = 1
                             name_str = f"{yr}年"
 
                         fig.add_trace(go.Scatter(
@@ -275,13 +283,11 @@ if st.button("🚀 开始运行", type="primary"):
                             hovertemplate="<b>%{x|%Y-%m-%d}</b><br>热度: %{y:.1f}<extra></extra>"
                         ))
                 
-                # 标记月份区间 (红色背景)
                 try:
                     ref_year = ref_years[0]
                     v_start = datetime(ref_year, t_start, 1)
                     if t_end == 12: v_end = datetime(ref_year, 12, 31)
                     else: v_end = datetime(ref_year, t_end + 1, 1) - timedelta(days=1)
-                    
                     fig.add_vrect(x0=v_start, x1=v_end, fillcolor="red", opacity=0.1, annotation_text=f"{target_year}预测")
                 except: pass
                 
