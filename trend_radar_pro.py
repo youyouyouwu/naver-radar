@@ -75,19 +75,11 @@ def get_datalab_trend(client_id, client_secret, keyword):
 
 # ================= 4. 辅助函数：销量评级逻辑 =================
 def get_sales_grade(monthly_sales):
-    """
-    根据月均单量返回评级
-    """
-    if monthly_sales < 30:
-        return "💀 废铁级"
-    elif monthly_sales < 100:
-        return "🥉 青铜级"
-    elif monthly_sales < 300:
-        return "🥈 白银级"
-    elif monthly_sales < 1000:
-        return "🥇 黄金级"
-    else:
-        return "💎 钻石级"
+    if monthly_sales < 30: return "💀 废铁级"
+    elif monthly_sales < 100: return "🥉 青铜级"
+    elif monthly_sales < 300: return "🥈 白银级"
+    elif monthly_sales < 1000: return "🥇 黄金级"
+    else: return "💎 钻石级"
 
 # ================= 5. 计算核心 =================
 def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target_end_m, cvr_rate, volume_ratio, compare_years_depth):
@@ -122,7 +114,6 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     
     for yr in reference_years:
         mask_base = (df['year'] == yr) & (df['month'] == base_month)
-        
         base_data = df[mask_base]
         if not base_data.empty:
             val_base = base_data['ratio'].mean()
@@ -136,7 +127,6 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
              mask_target = (df['year'] == yr) & ((df['month'] >= target_start_m) | (df['month'] <= target_end_m))
              
         val_target = df[mask_target]['ratio'].mean() if not df[mask_target].empty else 0
-        
         m = val_target / val_base
         multipliers.append(m)
             
@@ -160,36 +150,28 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     elif avg_multiplier > 1.2: tag, score = "📈 A级: 稳步增长", 80
     elif avg_multiplier < 0.8: tag, score = "❄️ D级: 季节性回落", 0
     
-    # 🔥🔥🔥 核心修改：生成文案和评级 🔥🔥🔥
     if current_vol < 100:
         display_monthly_sales = "⚠️ 当前无基数"
         display_total_stock = "📉 建议旺季前再测"
-        sales_grade = "❓ 数据不足" # 基数过低不给评级
+        sales_grade = "❓ 数据不足" 
     else:
         display_monthly_sales = f"{int(predicted_monthly_sales)} 单"
         display_total_stock = f"{int(total_season_sales)} 单"
-        # 计算评级
         sales_grade = get_sales_grade(predicted_monthly_sales)
 
     return {
         "关键词": keyword,
-        "增长评级": tag, # 改名避免混淆
+        "增长评级": tag,
         "竞争度": comp_idx,
         "当前Search量": int(current_vol),
         "增长系数": round(avg_multiplier, 2),
         "🔍 预测Naver热度": int(predicted_naver_vol),
         "🔵 预估Coupang流量": int(predicted_coupang_vol), 
-        
-        # 排序用
         "_sort_sales": -1 if current_vol < 100 else int(predicted_monthly_sales),
-        
-        # 展示用
         "💰 月均单量": display_monthly_sales,
-        "🏆 潜力评级": sales_grade, # 新增列
+        "🏆 潜力评级": sales_grade, 
         "📦 备货总单量": display_total_stock,
-        
         "RawData": df,
-        "参考年份数": compare_years_depth,
         "reference_years": reference_years
     }
 
@@ -213,7 +195,6 @@ with st.sidebar:
     current_y = datetime.now().year
     year_options = [current_y + i for i in range(-3, 4)]
     default_year_index = year_options.index(current_y)
-    
     target_year = st.selectbox("1. 目标年份", year_options, index=default_year_index)
     target_range = st.slider("2. 月份区间", 1, 12, (10, 11), format="%d月")
     t_start, t_end = target_range
@@ -227,7 +208,17 @@ with st.sidebar:
 st.write("### 📝 第三步：输入关键词")
 keywords_input = st.text_area("输入关键词 (每行一个)", height=150, placeholder="例如：\n감따는기구\n가습기")
 
-if st.button("🚀 开始运行", type="primary"):
+# 🔥🔥🔥 布局更新：开始和停止按钮并排 🔥🔥🔥
+col_run, col_stop = st.columns([1, 6])
+with col_run:
+    start_run = st.button("🚀 开始运行", type="primary")
+with col_stop:
+    stop_run = st.button("🛑 停止/刷新")
+
+if stop_run:
+    st.stop() # 强制停止并刷新页面状态
+
+if start_run:
     missing_items = []
     if not ads_key: missing_items.append("Access License")
     if not ads_secret: missing_items.append("Secret Key")
@@ -261,22 +252,37 @@ if st.button("🚀 开始运行", type="primary"):
             df = pd.DataFrame(results).sort_values(by=['_sort_sales'], ascending=False)
             st.success(f"✅ {target_year}年 预测报告生成完毕！")
             
+            # 准备展示和下载的数据（去掉复杂列）
+            display_cols = ["关键词", "增长评级", "竞争度", "当前Search量", "增长系数", 
+                           "🔍 预测Naver热度", "🔵 预估Coupang流量", "💰 月均单量", 
+                           "🏆 潜力评级", "📦 备货总单量"]
+            
+            clean_df = df[display_cols]
+            
+            # 展示表格
             st.dataframe(
-                df.drop(columns=['RawData', 'reference_years', '参考年份数', '_sort_sales']),
+                clean_df,
                 use_container_width=True,
                 column_config={
                     "当前Search量": st.column_config.NumberColumn(format="%d"),
                     "增长系数": st.column_config.NumberColumn(format="x %.2f"),
                     "🔍 预测Naver热度": st.column_config.NumberColumn(format="%d"),
                     "🔵 预估Coupang流量": st.column_config.NumberColumn(format="%d"),
-                    "💰 月均单量": st.column_config.TextColumn(help="基数过低时显示提示"),
-                    "🏆 潜力评级": st.column_config.TextColumn(help="根据月均单量自动分级"),
-                    "📦 备货总单量": st.column_config.TextColumn(help="基数过低时显示提示"),
-                    "竞争度": st.column_config.TextColumn()
                 }
             )
             
-            # 🔥🔥🔥 新增：底部备注评价标准 🔥🔥🔥
+            # 🔥🔥🔥 新增：CSV 下载按钮 🔥🔥🔥
+            # 使用 utf-8-sig 编码，确保 Excel 打开韩文不乱码
+            csv = clean_df.to_csv(index=False).encode('utf-8-sig')
+            
+            st.download_button(
+                label="📥 下载 CSV 报告 (Excel可用)",
+                data=csv,
+                file_name=f'Naver_Prediction_{target_year}_{t_start}-{t_end}月.csv',
+                mime='text/csv',
+                type="primary"
+            )
+            
             st.markdown("""
             ---
             **📊 评级标准说明 (参考中小件产品)：**
@@ -293,7 +299,6 @@ if st.button("🚀 开始运行", type="primary"):
                 ref_years = row['reference_years']
                 
                 fig = go.Figure()
-                
                 this_year_real = datetime.now().year
                 all_years_to_plot = ref_years + [this_year_real]
                 years_in_data = sorted(raw_df['year'].unique())
@@ -301,7 +306,6 @@ if st.button("🚀 开始运行", type="primary"):
                 for yr in years_in_data:
                     if yr in all_years_to_plot:
                         y_data = raw_df[raw_df['year'] == yr]
-                        
                         if yr == this_year_real:
                             line_style = dict(color='red', width=3)
                             name_str = f"{yr}年 (今年实况)"
@@ -314,7 +318,6 @@ if st.button("🚀 开始运行", type="primary"):
                             name=name_str, line=line_style,
                             hovertemplate="<b>%{x|%Y-%m-%d}</b><br>热度: %{y:.1f}<extra></extra>"
                         ))
-                
                 try:
                     ref_year = ref_years[0]
                     v_start = datetime(ref_year, t_start, 1)
