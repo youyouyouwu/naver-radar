@@ -48,7 +48,6 @@ def get_real_search_volume(api_key, secret_key, customer_id, keyword):
                         pc = 10 if str(item['monthlyPcQcCnt']).startswith("<") else int(item['monthlyPcQcCnt'])
                         mo = 10 if str(item['monthlyMobileQcCnt']).startswith("<") else int(item['monthlyMobileQcCnt'])
                         return {"total_vol": pc + mo, "compIdx": item['compIdx']}
-        # 没找到或流量极低
         return {"total_vol": 0, "compIdx": "低"} 
     except:
         return None
@@ -74,7 +73,23 @@ def get_datalab_trend(client_id, client_secret, keyword):
     except: return None
     return None
 
-# ================= 4. 计算核心 =================
+# ================= 4. 辅助函数：销量评级逻辑 =================
+def get_sales_grade(monthly_sales):
+    """
+    根据月均单量返回评级
+    """
+    if monthly_sales < 30:
+        return "💀 废铁级"
+    elif monthly_sales < 100:
+        return "🥉 青铜级"
+    elif monthly_sales < 300:
+        return "🥈 白银级"
+    elif monthly_sales < 1000:
+        return "🥇 黄金级"
+    else:
+        return "💎 钻石级"
+
+# ================= 5. 计算核心 =================
 def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target_end_m, cvr_rate, volume_ratio, compare_years_depth):
     # Step 1: Ads 流量
     ads_data = get_real_search_volume(ads_keys['key'], ads_keys['secret'], ads_keys['id'], keyword)
@@ -145,28 +160,32 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
     elif avg_multiplier > 1.2: tag, score = "📈 A级: 稳步增长", 80
     elif avg_multiplier < 0.8: tag, score = "❄️ D级: 季节性回落", 0
     
-    # 🔥🔥🔥 核心修复：提高基数门槛到 100 🔥🔥🔥
-    # 之前是 < 10，导致 90 这种低流量词也会被放大几千倍
+    # 🔥🔥🔥 核心修改：生成文案和评级 🔥🔥🔥
     if current_vol < 100:
-        display_monthly_sales = "⚠️ 当前基数过低"
+        display_monthly_sales = "⚠️ 当前无基数"
         display_total_stock = "📉 建议旺季前再测"
+        sales_grade = "❓ 数据不足" # 基数过低不给评级
     else:
         display_monthly_sales = f"{int(predicted_monthly_sales)} 单"
         display_total_stock = f"{int(total_season_sales)} 单"
+        # 计算评级
+        sales_grade = get_sales_grade(predicted_monthly_sales)
 
     return {
         "关键词": keyword,
-        "评级": tag,
+        "增长评级": tag, # 改名避免混淆
         "竞争度": comp_idx,
         "当前Search量": int(current_vol),
         "增长系数": round(avg_multiplier, 2),
         "🔍 预测Naver热度": int(predicted_naver_vol),
         "🔵 预估Coupang流量": int(predicted_coupang_vol), 
         
-        # 排序权重: 如果基数过低，强制排在后面
+        # 排序用
         "_sort_sales": -1 if current_vol < 100 else int(predicted_monthly_sales),
         
+        # 展示用
         "💰 月均单量": display_monthly_sales,
+        "🏆 潜力评级": sales_grade, # 新增列
         "📦 备货总单量": display_total_stock,
         
         "RawData": df,
@@ -174,7 +193,7 @@ def calculate_prediction(keyword, ads_keys, datalab_keys, target_start_m, target
         "reference_years": reference_years
     }
 
-# ================= 5. UI 界面 =================
+# ================= 6. UI 界面 =================
 st.title("☢️ Naver 选品核武器")
 
 with st.sidebar:
@@ -246,15 +265,27 @@ if st.button("🚀 开始运行", type="primary"):
                 df.drop(columns=['RawData', 'reference_years', '参考年份数', '_sort_sales']),
                 use_container_width=True,
                 column_config={
-                    "当前Search量": st.column_config.NumberColumn(format="%d", help="当前30天真实数据"),
+                    "当前Search量": st.column_config.NumberColumn(format="%d"),
                     "增长系数": st.column_config.NumberColumn(format="x %.2f"),
                     "🔍 预测Naver热度": st.column_config.NumberColumn(format="%d"),
                     "🔵 预估Coupang流量": st.column_config.NumberColumn(format="%d"),
-                    "💰 月均单量": st.column_config.TextColumn(help="基数<100时不显示预测"),
-                    "📦 备货总单量": st.column_config.TextColumn(help="基数<100时不显示预测"),
+                    "💰 月均单量": st.column_config.TextColumn(help="基数过低时显示提示"),
+                    "🏆 潜力评级": st.column_config.TextColumn(help="根据月均单量自动分级"),
+                    "📦 备货总单量": st.column_config.TextColumn(help="基数过低时显示提示"),
                     "竞争度": st.column_config.TextColumn()
                 }
             )
+            
+            # 🔥🔥🔥 新增：底部备注评价标准 🔥🔥🔥
+            st.markdown("""
+            ---
+            **📊 评级标准说明 (参考中小件产品)：**
+            * 💀 **废铁级 (<30单)**：没跑通。每天不到1单，无法覆盖成本，建议放弃。
+            * 🥉 **青铜级 (30-100单)**：及格线。日均1-3单，起步阶段，需优化Listing或加广告。
+            * 🥈 **白银级 (100-300单)**：养家稳款。日均3-10单，现金流健康，最舒服的状态。
+            * 🥇 **黄金级 (300-1000单)**：小爆款。细分小类目前几名，严防跟卖，扩充变体。
+            * 💎 **钻石级 (>1000单)**：大爆款。类目霸主，流量巨大，需全力备货并注意资金压力。
+            """)
             
             st.divider()
             for _, row in df.head(3).iterrows():
